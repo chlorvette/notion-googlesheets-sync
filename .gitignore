@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Secret Credentials
+credentials.json
+token.json
+
+# Change to data file path
+data.json
