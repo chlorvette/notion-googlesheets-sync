@@ -4,6 +4,7 @@ import uuid
 import json
 import datetime
 from notion_client import Client
+import pprint
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -54,39 +55,23 @@ def main():
                 .get(spreadsheetId=SPREADSHEET_ID, range=RANGE_NAME)
                 .execute()
         )
-        values = result.get("values", [])
+        sheets_values = result.get("values", [])
 
-        if not values:
+        if not sheets_values:
             print("No data found.")
             return
 
-        for row in values:
+        for row in sheets_values:
             try:
-                if row[6] == "":
+                sync_id = row[6]
+                if sync_id == "":
                     row.append(uuid.uuid4().hex)
-                    update_result = (
-                        service.spreadsheets().values().update(
-                            spreadsheetId=SPREADSHEET_ID,
-                            range=f"todo!G{values.index(row) + 2}",
-                            valueInputOption="RAW",
-                            body={"values": [[row[6]]]}
-                        )
-                        .execute()
-                    )
+                    service.spreadsheets().values().update(spreadsheetId=SPREADSHEET_ID, range=f"todo!G{sheets_values.index(row) + 2}", valueInputOption="RAW", body={"values": [[sync_id]]}).execute()
                 if len(row) < 8:
                     row.append(datetime.datetime.now().isoformat())
-                    update_result = (
-                        service.spreadsheets().values().update(
-                            spreadsheetId=SPREADSHEET_ID,
-                            range=f"todo!H{values.index(row) + 2}",
-                            valueInputOption="RAW",
-                            body={"values": [[row[7]]]}
-                        )
-                        .execute()
-                    )
-                print(f"{row[0]}, {row[1]}, {row[2]}, {row[3]}, {row[4]}, {row[5]}, {row[6]}, {row[7]}")
-                if row[6] not in data.keys():
-                        data[row[6]] = {
+                    service.spreadsheets().values().update(spreadsheetId=SPREADSHEET_ID, range=f"todo!H{sheets_values.index(row) + 2}", valueInputOption="RAW", body={"values": [[row[7]]]}).execute()
+                if sync_id not in data.keys():
+                        data[sync_id] = {
                             "checked": row[0],
                             "name": row[1],
                             "status": row[2],
@@ -95,15 +80,34 @@ def main():
                             "effort": row[5],
                             "last_updated": row[7]
                         }
+                else:
+                    item_properties = data[sync_id]
             except:
                 break
     except HttpError as err:
         print(err)
-    
-    with open(DATA_FILE_PATH, "w") as data_file:
-        json.dump(data, data_file, indent=4)
 
-    
+    # fetch notion
+
+    notion_database = client.databases.retrieve(os.environ.get("DATABASE_ID"))
+    notion_database_items = client.data_sources.query(data_source_id=notion_database["data_sources"][0]["id"])
+
+    for database_item in notion_database_items["results"]:
+        item_properties = database_item["properties"]
+        sync_id = item_properties["sync_id"]['rich_text'][0]['plain_text']
+        if not sync_id in data.keys():
+            data[sync_id] = {
+                "checked": str(item_properties["Checkbox"]['checkbox']).upper(),
+                "name": item_properties["Name"]['title'][0]['text']['content'],
+                "status": item_properties["status"]['status']['name'],
+                "due": item_properties["due"]['date']['start'].replace("-", "/"),
+                "priority": item_properties["priority"]['select']['name'],
+                "effort": item_properties["effort"]['select']['name'],
+                "last_updated": datetime.datetime.now().isoformat()
+            }
+
+    with open(DATA_FILE_PATH, "w") as data_file:
+            json.dump(data, data_file, indent=4)
 
 if __name__ == "__main__":
     main()
