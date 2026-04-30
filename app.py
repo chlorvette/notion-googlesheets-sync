@@ -23,6 +23,14 @@ SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 RANGE_NAME = "todo!A2:H"
 DATA_FILE_PATH = os.environ.get("DATA_FILE_PATH")
 
+def get_color(text):
+    if text == "not started" or text == "high":
+        return "red"
+    elif text == "in progress" or text == "medium":
+        return "yellow"
+    elif text == "complete" or text == "low":
+        return "green"
+
 def main():
     creds = None
         
@@ -56,6 +64,7 @@ def main():
                 .execute()
         )
         sheets_values = result.get("values", [])
+        notion_to_add = {}
 
         if not sheets_values:
             print("No data found.")
@@ -80,6 +89,7 @@ def main():
                             "effort": row[5],
                             "last_updated": row[7]
                         }
+                        notion_to_add[sync_id] = data[sync_id]
                 else:
                     item_properties = data[sync_id]
             except:
@@ -91,9 +101,11 @@ def main():
 
     notion_database = client.databases.retrieve(os.environ.get("DATABASE_ID"))
     notion_database_items = client.data_sources.query(data_source_id=notion_database["data_sources"][0]["id"])
+    sheets_to_add = []
 
     for database_item in notion_database_items["results"]:
         item_properties = database_item["properties"]
+        print(item_properties)
         sync_id = item_properties["sync_id"]['rich_text'][0]['plain_text']
         if not sync_id in data.keys():
             data[sync_id] = {
@@ -105,9 +117,115 @@ def main():
                 "effort": item_properties["effort"]['select']['name'],
                 "last_updated": datetime.datetime.now().isoformat()
             }
+            sheets_to_add.append(data[sync_id])
 
     with open(DATA_FILE_PATH, "w") as data_file:
             json.dump(data, data_file, indent=4)
+    
+    for item_sync_id in notion_to_add:
+        client.pages.create(parent={"database_id": os.environ.get("DATABASE_ID")}, properties={
+            'last_updated': {
+                'type': 'rich_text', 
+                'rich_text': [
+                    {
+                        'type': 'text', 
+                        'text': {
+                            'content': notion_to_add[item_sync_id]['last_updated'], 
+                            'link': None
+                        }, 
+                        'annotations': {
+                            'bold': False, 
+                            'italic': False, 
+                            'strikethrough': False, 
+                            'underline': False, 
+                            'code': False, 
+                            'color': 'default'
+                        }, 
+                        'plain_text': notion_to_add[item_sync_id]['last_updated'], 
+                        'href': None
+                    }
+                ]
+            }, 
+            'due': {
+                'type': 'date', 
+                'date': {
+                    'start': datetime.datetime.strptime(notion_to_add[item_sync_id]['due'], "%m/%d/%Y").date().isoformat(),
+                    'end': None, 
+                    'time_zone': None
+                }
+            }, 
+            'status': {
+                'type': 'status', 
+                'status': {
+                    'name': notion_to_add[item_sync_id]['status'], 
+                    'color': get_color(notion_to_add[item_sync_id]['status'])
+                }
+            }, 
+            'effort': {
+                'type': 'select', 
+                'select': {
+                    'name': notion_to_add[item_sync_id]['effort'], 
+                    'color': get_color(notion_to_add[item_sync_id]['effort'])
+                }
+            }, 
+            'sync_id': {
+                'type': 'rich_text', 
+                'rich_text': [
+                    {
+                        'type': 'text', 
+                        'text': {
+                            'content': item_sync_id, 
+                            'link': None
+                        }, 
+                        'annotations': {
+                            'bold': False, 
+                            'italic': False, 
+                            'strikethrough': False, 
+                            'underline': False, 
+                            'code': False, 'color': 
+                            'default'
+                        }, 
+                        'plain_text': item_sync_id, 
+                        'href': None
+                    }
+                ]
+            }, 
+            'Checkbox': {
+                'type': 'checkbox', 
+                'checkbox': notion_to_add[item_sync_id]['checked'] == "TRUE"
+            }, 
+            'priority': {
+                'type': 'select', 
+                'select': {
+                    'name': notion_to_add[item_sync_id]['priority'], 
+                    'color': get_color(notion_to_add[item_sync_id]['priority'])
+                }
+            }, 
+            'Name': {
+                'id': 'title', 
+                'type': 'title', 
+                'title': [
+                    {
+                        'type': 'text', 
+                        'text': {
+                            'content': notion_to_add[item_sync_id]['name'], 
+                            'link': None
+                        }, 
+                        'annotations': {
+                            'bold': False, 
+                            'italic': False, 
+                            'strikethrough': False, 
+                            'underline': False, 
+                            'code': False, 
+                            'color': 'default'
+                        }, 
+                        'plain_text': notion_to_add[item_sync_id]['name'], 
+                        'href': None
+                    }
+                ]
+            }
+        }
+    )
 
 if __name__ == "__main__":
     main()
